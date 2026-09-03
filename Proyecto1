@@ -1,0 +1,138 @@
+#!/usr/bin/env python3
+import sys
+
+SOPORTADAS = ["add", "sub", "and", "or", "addi", "andi",
+              "lw", "lb", "sw", "sb", "beq", "bne"]
+
+INSTRUCTIONS = {
+    "add": {
+        "format": "R",
+        "opcode": 0b0110011,
+        "funct3": 0b000,
+        "funct7": 0b0000000,
+    },
+    "sub": {
+        "format": "R",
+        "opcode": 0b0110011,
+        "funct3": 0b000,
+        "funct7": 0b0100000,
+    },
+    "and": {
+        "format": "R",
+        "opcode": 0b0110011,
+        "funct3": 0b111,
+        "funct7": 0b0000000,
+    },
+    "or": {
+        "format": "R",
+        "opcode": 0b0110011,
+        "funct3": 0b110,
+        "funct7": 0b0000000,
+    },
+}
+#Funcion para interpretar los registros
+def parse_register(text: str) -> int:
+    text = text.strip()
+
+    if not text.startswith("x"):
+        raise ValueError(f"Registro inválido: {text}")
+
+    try:
+        number = int(text[1:])
+    except ValueError:
+        raise ValueError(f"Registro inválido: {text}")
+
+    if number < 0 or number > 31:
+        raise ValueError(f"Registro fuera de rango: {text}")
+
+    return number
+
+
+
+def encode_instruction(instruction: str) -> int:
+    instruction = instruction.strip()
+    parts = instruction.replace(",", " ").split()
+
+    if not parts:
+        raise ValueError("La instrucción está vacía")
+
+    mnemonic = parts[0].lower()
+
+    if mnemonic not in INSTRUCTIONS:
+        raise ValueError(f"Instrucción no soportada: {mnemonic}")
+
+    info = INSTRUCTIONS[mnemonic]
+
+    if info["format"] == "R":
+        if len(parts) != 4:
+            raise ValueError(
+                f"Formato inválido para {mnemonic}. "
+                f"Use: {mnemonic} rd, rs1, rs2"
+            )
+
+        rd = parse_register(parts[1])
+        rs1 = parse_register(parts[2])
+        rs2 = parse_register(parts[3])
+
+        word = (
+            (info["funct7"] << 25)
+            | (rs2 << 20)
+            | (rs1 << 15)
+            | (info["funct3"] << 12)
+            | (rd << 7)
+            | info["opcode"]
+        )
+
+        return word
+
+    raise ValueError(f"Formato todavía no implementado: {info['format']}")
+
+
+def explain_instruction(instruction: str, word: int) -> str:
+    parts = instruction.replace(",", " ").split()
+    mnemonic = parts[0].lower()
+
+    info = INSTRUCTIONS[mnemonic]
+
+    if info["format"] == "R":
+        rd = (word >> 7) & 0b11111
+        funct3 = (word >> 12) & 0b111
+        rs1 = (word >> 15) & 0b11111
+        rs2 = (word >> 20) & 0b11111
+        funct7 = (word >> 25) & 0b1111111
+        opcode = word & 0b1111111
+
+        binary = f"{word:032b}"
+
+        return (
+            f"Formato: R\n"
+            f"Binario: {binary}\n\n"
+            f"funct7 [31:25] = {funct7:07b}\n"
+            f"rs2    [24:20] = {rs2:05b} (x{rs2})\n"
+            f"rs1    [19:15] = {rs1:05b} (x{rs1})\n"
+            f"funct3 [14:12] = {funct3:03b}\n"
+            f"rd     [11:7]  = {rd:05b} (x{rd})\n"
+            f"opcode [6:0]   = {opcode:07b}\n"
+        )
+
+    raise ValueError("Formato no implementado en la explicación")
+
+
+def main():
+    if len(sys.argv) != 2:
+        print(f'Uso: {sys.argv[0]} "<instruccion>"', file=sys.stderr)
+        print(f'Ejemplo: {sys.argv[0]} "add x5, x6, x7"', file=sys.stderr)
+        sys.exit(2)
+
+    instruction = sys.argv[1]
+    word = encode_instruction(instruction) & 0xFFFFFFFF
+
+    print(explain_instruction(instruction, word))
+
+    # No modificar el formato de la siguiente línea: la especificación la
+    # requiere, literal, para permitir la validación automática.
+    print(f"HEX: 0x{word:08x}")
+
+
+if __name__ == "__main__":
+    main()
