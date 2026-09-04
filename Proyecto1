@@ -50,6 +50,16 @@ INSTRUCTIONS = {
         "opcode": 0b0000011,
         "funct3": 0b000,
 },
+    "sw": {
+    "format": "S",
+    "opcode": 0b0100011,
+    "funct3": 0b010,
+},
+    "sb": {
+        "format": "S",
+        "opcode": 0b0100011,
+        "funct3": 0b000,
+},
 }
 #Funcion para interpretar los registros
 def parse_register(text: str) -> int:
@@ -192,6 +202,40 @@ def encode_instruction(instruction: str) -> int:
             | info["opcode"]
         )
 
+        return word
+    
+    if info["format"] == "S":
+        if len(parts) < 3:
+            raise ValueError(
+                f"Formato inválido para {mnemonic}. "
+                f"Use: {mnemonic} rs2, desplazamiento(rs1)"
+            )
+
+        # Primer operando: registro cuyo dato se almacena
+        rs2 = parse_register(parts[1])
+
+        # Reconstruir el operando de memoria
+        memory_operand = "".join(parts[2:])
+
+        # Obtener desplazamiento y registro base
+        imm, rs1 = parse_memory_operand(memory_operand)
+
+        # Representación de 12 bits del inmediato
+        imm12 = imm & 0xFFF
+
+        # Separar el inmediato
+        imm_11_5 = (imm12 >> 5) & 0b1111111
+        imm_4_0 = imm12 & 0b11111
+
+        word = (
+            (imm_11_5 << 25)
+            | (rs2 << 20)
+            | (rs1 << 15)
+            | (info["funct3"] << 12)
+            | (imm_4_0 << 7)
+            | info["opcode"]
+        )
+
         return word   
 
 
@@ -312,8 +356,54 @@ def explain_instruction(instruction: str, word: int) -> str:
             f"opcode [6:0]   = {opcode:07b}\n"
             f"  -> Identifica la familia de la instrucción\n"
         )
+        
+        
+    # ============================================================
+    # FORMATO S
+    # ============================================================
+    if info["format"] == "S":
+        opcode = word & 0b1111111
+        imm_4_0 = (word >> 7) & 0b11111
+        funct3 = (word >> 12) & 0b111
+        rs1 = (word >> 15) & 0b11111
+        rs2 = (word >> 20) & 0b11111
+        imm_11_5 = (word >> 25) & 0b1111111
 
-    # Por ahora S y B todavía no están implementados
+        # Reconstruir el inmediato completo de 12 bits
+        imm12 = (imm_11_5 << 5) | imm_4_0
+
+        # Interpretarlo como número con signo
+        if imm12 & 0x800:
+            imm = imm12 - 0x1000
+        else:
+            imm = imm12
+
+        return (
+            f"Formato: S\n"
+            f"Binario: {binary}\n\n"
+
+            f"imm[11:5] [31:25] = {imm_11_5:07b}\n"
+            f"  -> Parte superior del desplazamiento {imm}\n"
+
+            f"rs2       [24:20] = {rs2:05b} (x{rs2})\n"
+            f"  -> x{rs2} contiene el dato que se almacena en memoria\n"
+
+            f"rs1       [19:15] = {rs1:05b} (x{rs1})\n"
+            f"  -> x{rs1} contiene la dirección base de memoria\n"
+
+            f"funct3    [14:12] = {funct3:03b}\n"
+            f"  -> Selecciona la operación específica {mnemonic}\n"
+
+            f"imm[4:0]  [11:7]  = {imm_4_0:05b}\n"
+            f"  -> Parte inferior del desplazamiento {imm}\n"
+
+            f"opcode    [6:0]   = {opcode:07b}\n"
+            f"  -> Identifica la familia de instrucciones de almacenamiento\n\n"
+
+            f"Inmediato reconstruido: {imm12:012b} ({imm})\n"
+            f"Dirección efectiva: x{rs1} + ({imm})\n"
+        )
+
     raise ValueError(
         f"Formato no implementado en la explicación: {info['format']}"
     )
