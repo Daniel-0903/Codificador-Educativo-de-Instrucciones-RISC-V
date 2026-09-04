@@ -29,6 +29,27 @@ INSTRUCTIONS = {
         "funct3": 0b110,
         "funct7": 0b0000000,
     },
+    "addi": {
+        "format": "I",
+        "opcode": 0b0010011,
+        "funct3": 0b000,
+},
+    "andi": {
+        "format": "I",
+        "opcode": 0b0010011,
+        "funct3": 0b111,
+},
+    
+    "lw": {
+        "format": "I",
+        "opcode": 0b0000011,
+        "funct3": 0b010,
+    },
+    "lb": {
+        "format": "I",
+        "opcode": 0b0000011,
+        "funct3": 0b000,
+},
 }
 #Funcion para interpretar los registros
 def parse_register(text: str) -> int:
@@ -47,7 +68,47 @@ def parse_register(text: str) -> int:
 
     return number
 
+#interpretar inmediatos
+def parse_immediate(text: str, bits: int) -> int:
+    try:
+        value = int(text, 0) #aceptar numeros positivos y negativos
+    except ValueError:
+        raise ValueError(f"Inmediato inválido: {text}")
 
+    minimum = -(1 << (bits - 1))
+    maximum = (1 << (bits - 1)) - 1
+
+    if value < minimum or value > maximum:
+        raise ValueError(
+            f"Inmediato fuera de rango para {bits} bits: {value}"
+        )
+
+    return value
+
+#transformar el 8(x30) en imm=8 y rs1=30. Esto en lw y lb
+def parse_memory_operand(text: str):
+    text = text.strip()
+
+    if "(" not in text or ")" not in text:
+        raise ValueError(
+            f"Operando de memoria inválido: {text}"
+        )
+
+    left = text.find("(")
+    right = text.find(")")
+
+    if right != len(text) - 1 or right < left:
+        raise ValueError(
+            f"Operando de memoria inválido: {text}"
+        )
+
+    offset_text = text[:left]
+    register_text = text[left + 1:right]
+    #reutilizar las otras funciones
+    imm = parse_immediate(offset_text, 12)
+    rs1 = parse_register(register_text)
+
+    return imm, rs1
 
 def encode_instruction(instruction: str) -> int:
     instruction = instruction.strip()
@@ -82,40 +143,180 @@ def encode_instruction(instruction: str) -> int:
             | (rd << 7)
             | info["opcode"]
         )
-
         return word
+
+    if info["format"] == "I":
+
+        # I aritmético: addi rd, rs1, imm
+        #               andi rd, rs1, imm
+        if mnemonic in ("addi", "andi"):
+
+            if len(parts) != 4:
+                raise ValueError(
+                    f"Formato inválido para {mnemonic}. "
+                    f"Use: {mnemonic} rd, rs1, inmediato"
+                )
+
+            rd = parse_register(parts[1])
+            rs1 = parse_register(parts[2])
+            imm = parse_immediate(parts[3], 12)
+
+        # I de carga: lw rd, imm(rs1)
+        #             lb rd, imm(rs1)
+        elif mnemonic in ("lw", "lb"):
+
+            if len(parts) < 3:
+                raise ValueError(
+                    f"Formato inválido para {mnemonic}. "
+                    f"Use: {mnemonic} rd, desplazamiento(rs1)"
+                )
+
+            rd = parse_register(parts[1])
+
+            memory_operand = "".join(parts[2:])
+
+            imm, rs1 = parse_memory_operand(memory_operand)
+
+        else:
+            raise ValueError(
+                f"Instrucción I no reconocida: {mnemonic}"
+            )
+
+        imm12 = imm & 0xFFF
+
+        word = (
+            (imm12 << 20)
+            | (rs1 << 15)
+            | (info["funct3"] << 12)
+            | (rd << 7)
+            | info["opcode"]
+        )
+
+        return word   
+
 
     raise ValueError(f"Formato todavía no implementado: {info['format']}")
 
 
 def explain_instruction(instruction: str, word: int) -> str:
+    # Separar la instrucción para obtener el mnemónico
     parts = instruction.replace(",", " ").split()
+
+    if not parts:
+        raise ValueError("La instrucción está vacía")
+
     mnemonic = parts[0].lower()
+
+    if mnemonic not in INSTRUCTIONS:
+        raise ValueError(f"Instrucción no soportada: {mnemonic}")
 
     info = INSTRUCTIONS[mnemonic]
 
+    # Representación binaria completa de 32 bits
+    binary = f"{word:032b}"
+
+    # ============================================================
+    # FORMATO R
+    # ============================================================
     if info["format"] == "R":
+        opcode = word & 0b1111111
         rd = (word >> 7) & 0b11111
         funct3 = (word >> 12) & 0b111
         rs1 = (word >> 15) & 0b11111
         rs2 = (word >> 20) & 0b11111
         funct7 = (word >> 25) & 0b1111111
-        opcode = word & 0b1111111
-
-        binary = f"{word:032b}"
 
         return (
             f"Formato: R\n"
             f"Binario: {binary}\n\n"
+
             f"funct7 [31:25] = {funct7:07b}\n"
+            f"  -> Ayuda a identificar la operación {mnemonic}\n"
+
             f"rs2    [24:20] = {rs2:05b} (x{rs2})\n"
+            f"  -> x{rs2} es el segundo registro fuente\n"
+
             f"rs1    [19:15] = {rs1:05b} (x{rs1})\n"
+            f"  -> x{rs1} es el primer registro fuente\n"
+
             f"funct3 [14:12] = {funct3:03b}\n"
+            f"  -> Ayuda a seleccionar la operación {mnemonic}\n"
+
             f"rd     [11:7]  = {rd:05b} (x{rd})\n"
+            f"  -> x{rd} recibe el resultado de la operación\n"
+
             f"opcode [6:0]   = {opcode:07b}\n"
+            f"  -> Identifica la familia de instrucciones registro-registro\n"
         )
 
-    raise ValueError("Formato no implementado en la explicación")
+    # ============================================================
+    # FORMATO I
+    # ============================================================
+    if info["format"] == "I":
+        opcode = word & 0b1111111
+        rd = (word >> 7) & 0b11111
+        funct3 = (word >> 12) & 0b111
+        rs1 = (word >> 15) & 0b11111
+        imm12 = (word >> 20) & 0xFFF
+
+        # Convertir el inmediato de 12 bits a valor con signo
+        if imm12 & 0x800:
+            imm = imm12 - 0x1000
+        else:
+            imm = imm12
+
+        # Explicación específica según el tipo de instrucción I
+        if mnemonic in ("lw", "lb"):
+            role_imm = (
+                f"Desplazamiento {imm} que se suma al registro base x{rs1}"
+            )
+            role_rs1 = (
+                f"x{rs1} contiene la dirección base de memoria"
+            )
+            role_rd = (
+                f"x{rd} recibe el dato cargado desde memoria"
+            )
+
+        elif mnemonic in ("addi", "andi"):
+            role_imm = (
+                f"Valor inmediato con signo utilizado por {mnemonic}"
+            )
+            role_rs1 = (
+                f"x{rs1} es el registro fuente"
+            )
+            role_rd = (
+                f"x{rd} recibe el resultado de la operación"
+            )
+
+        else:
+            role_imm = f"Inmediato con valor {imm}"
+            role_rs1 = f"x{rs1} es el registro fuente"
+            role_rd = f"x{rd} es el registro destino"
+
+        return (
+            f"Formato: I\n"
+            f"Binario: {binary}\n\n"
+
+            f"imm    [31:20] = {imm12:012b} ({imm})\n"
+            f"  -> {role_imm}\n"
+
+            f"rs1    [19:15] = {rs1:05b} (x{rs1})\n"
+            f"  -> {role_rs1}\n"
+
+            f"funct3 [14:12] = {funct3:03b}\n"
+            f"  -> Selecciona la operación específica {mnemonic}\n"
+
+            f"rd     [11:7]  = {rd:05b} (x{rd})\n"
+            f"  -> {role_rd}\n"
+
+            f"opcode [6:0]   = {opcode:07b}\n"
+            f"  -> Identifica la familia de la instrucción\n"
+        )
+
+    # Por ahora S y B todavía no están implementados
+    raise ValueError(
+        f"Formato no implementado en la explicación: {info['format']}"
+    )
 
 
 def main():
