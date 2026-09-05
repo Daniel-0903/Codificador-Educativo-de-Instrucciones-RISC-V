@@ -60,6 +60,16 @@ INSTRUCTIONS = {
         "opcode": 0b0100011,
         "funct3": 0b000,
 },
+    "beq": {
+        "format": "B",
+        "opcode": 0b1100011,
+        "funct3": 0b000,
+},
+    "bne": {
+        "format": "B",
+        "opcode": 0b1100011,
+        "funct3": 0b001,
+    },
 }
 #Funcion para interpretar los registros
 def parse_register(text: str) -> int:
@@ -119,6 +129,25 @@ def parse_memory_operand(text: str):
     rs1 = parse_register(register_text)
 
     return imm, rs1
+
+#reordenar el inmediato de bew y bne
+def parse_branch_immediate(text: str) -> int:
+    try:
+        value = int(text, 0)
+    except ValueError:
+        raise ValueError(f"Desplazamiento inválido: {text}")
+
+    if value < -4096 or value > 4094:
+        raise ValueError(
+            f"Desplazamiento de branch fuera de rango: {value}"
+        )
+
+    if value % 2 != 0:
+        raise ValueError(
+            "El desplazamiento de un branch debe ser múltiplo de 2"
+        )
+
+    return value
 
 def encode_instruction(instruction: str) -> int:
     instruction = instruction.strip()
@@ -233,6 +262,39 @@ def encode_instruction(instruction: str) -> int:
             | (rs1 << 15)
             | (info["funct3"] << 12)
             | (imm_4_0 << 7)
+            | info["opcode"]
+        )
+
+        return word
+    
+    if info["format"] == "B":
+        if len(parts) != 4:
+            raise ValueError(
+                f"Formato inválido para {mnemonic}. "
+                f"Use: {mnemonic} rs1, rs2, desplazamiento"
+            )
+
+        rs1 = parse_register(parts[1])
+        rs2 = parse_register(parts[2])
+        imm = parse_branch_immediate(parts[3])
+
+        # Representación del inmediato como 13 bits
+        imm13 = imm & 0x1FFF
+
+        # Extraer las partes que usa el formato B
+        imm_12 = (imm13 >> 12) & 0b1
+        imm_10_5 = (imm13 >> 5) & 0b111111
+        imm_4_1 = (imm13 >> 1) & 0b1111
+        imm_11 = (imm13 >> 11) & 0b1
+
+        word = (
+            (imm_12 << 31)
+            | (imm_10_5 << 25)
+            | (rs2 << 20)
+            | (rs1 << 15)
+            | (info["funct3"] << 12)
+            | (imm_4_1 << 8)
+            | (imm_11 << 7)
             | info["opcode"]
         )
 
@@ -403,6 +465,71 @@ def explain_instruction(instruction: str, word: int) -> str:
             f"Inmediato reconstruido: {imm12:012b} ({imm})\n"
             f"Dirección efectiva: x{rs1} + ({imm})\n"
         )
+        
+    # ============================================================
+    # FORMATO B
+    # ============================================================
+    if info["format"] == "B":
+        opcode = word & 0b1111111
+        imm_11 = (word >> 7) & 0b1
+        imm_4_1 = (word >> 8) & 0b1111
+        funct3 = (word >> 12) & 0b111
+        rs1 = (word >> 15) & 0b11111
+        rs2 = (word >> 20) & 0b11111
+        imm_10_5 = (word >> 25) & 0b111111
+        imm_12 = (word >> 31) & 0b1
+
+        # Reconstruir el inmediato en su orden original
+        imm13 = (
+            (imm_12 << 12)
+            | (imm_11 << 11)
+            | (imm_10_5 << 5)
+            | (imm_4_1 << 1)
+        )
+
+        # Interpretar como número con signo de 13 bits
+        if imm13 & 0x1000:
+            imm = imm13 - 0x2000
+        else:
+            imm = imm13
+
+        if mnemonic == "beq":
+            condition = f"salta si x{rs1} == x{rs2}"
+        else:
+            condition = f"salta si x{rs1} != x{rs2}"
+
+        return (
+            f"Formato: B\n"
+            f"Binario: {binary}\n\n"
+
+            f"imm[12]    [31]    = {imm_12:b}\n"
+            f"  -> Bit de signo del desplazamiento\n"
+
+            f"imm[10:5] [30:25] = {imm_10_5:06b}\n"
+            f"  -> Parte del desplazamiento del salto\n"
+
+            f"rs2       [24:20] = {rs2:05b} (x{rs2})\n"
+            f"  -> Segundo registro utilizado en la comparación\n"
+
+            f"rs1       [19:15] = {rs1:05b} (x{rs1})\n"
+            f"  -> Primer registro utilizado en la comparación\n"
+
+            f"funct3    [14:12] = {funct3:03b}\n"
+            f"  -> Selecciona la operación {mnemonic}\n"
+
+            f"imm[4:1]  [11:8]  = {imm_4_1:04b}\n"
+            f"  -> Parte del desplazamiento del salto\n"
+
+            f"imm[11]   [7]     = {imm_11:b}\n"
+            f"  -> Bit reubicado del desplazamiento\n"
+
+            f"opcode    [6:0]   = {opcode:07b}\n"
+            f"  -> Identifica la familia de saltos condicionales\n\n"
+
+            f"Inmediato reconstruido: {imm13:013b} ({imm})\n"
+            f"Condición: {condition}\n"
+            f"Destino: PC + ({imm}) bytes\n"
+        )
 
     raise ValueError(
         f"Formato no implementado en la explicación: {info['format']}"
@@ -420,8 +547,7 @@ def main():
 
     print(explain_instruction(instruction, word))
 
-    # No modificar el formato de la siguiente línea: la especificación la
-    # requiere, literal, para permitir la validación automática.
+
     print(f"HEX: 0x{word:08x}")
 
 
