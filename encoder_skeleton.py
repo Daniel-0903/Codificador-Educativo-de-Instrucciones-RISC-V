@@ -1,0 +1,557 @@
+#!/usr/bin/env python3
+import sys
+
+SOPORTADAS = ["add", "sub", "and", "or", "addi", "andi",
+              "lw", "lb", "sw", "sb", "beq", "bne"]
+
+INSTRUCTIONS = {
+    "add": {
+        "format": "R",
+        "opcode": 0b0110011,
+        "funct3": 0b000,
+        "funct7": 0b0000000,
+    },
+    "sub": {
+        "format": "R",
+        "opcode": 0b0110011,
+        "funct3": 0b000,
+        "funct7": 0b0100000,
+    },
+    "and": {
+        "format": "R",
+        "opcode": 0b0110011,
+        "funct3": 0b111,
+        "funct7": 0b0000000,
+    },
+    "or": {
+        "format": "R",
+        "opcode": 0b0110011,
+        "funct3": 0b110,
+        "funct7": 0b0000000,
+    },
+    "addi": {
+        "format": "I",
+        "opcode": 0b0010011,
+        "funct3": 0b000,
+},
+    "andi": {
+        "format": "I",
+        "opcode": 0b0010011,
+        "funct3": 0b111,
+},
+    
+    "lw": {
+        "format": "I",
+        "opcode": 0b0000011,
+        "funct3": 0b010,
+    },
+    "lb": {
+        "format": "I",
+        "opcode": 0b0000011,
+        "funct3": 0b000,
+},
+    "sw": {
+    "format": "S",
+    "opcode": 0b0100011,
+    "funct3": 0b010,
+},
+    "sb": {
+        "format": "S",
+        "opcode": 0b0100011,
+        "funct3": 0b000,
+},
+    "beq": {
+        "format": "B",
+        "opcode": 0b1100011,
+        "funct3": 0b000,
+},
+    "bne": {
+        "format": "B",
+        "opcode": 0b1100011,
+        "funct3": 0b001,
+    },
+}
+#Funcion para interpretar los registros
+def parse_register(text: str) -> int:
+    text = text.strip()
+
+    if not text.startswith("x"):
+        raise ValueError(f"Registro inválido: {text}")
+
+    try:
+        number = int(text[1:])
+    except ValueError:
+        raise ValueError(f"Registro inválido: {text}")
+
+    if number < 0 or number > 31:
+        raise ValueError(f"Registro fuera de rango: {text}")
+
+    return number
+
+#interpretar inmediatos
+def parse_immediate(text: str, bits: int) -> int:
+    try:
+        value = int(text, 0) #aceptar numeros positivos y negativos
+    except ValueError:
+        raise ValueError(f"Inmediato inválido: {text}")
+
+    minimum = -(1 << (bits - 1))
+    maximum = (1 << (bits - 1)) - 1
+
+    if value < minimum or value > maximum:
+        raise ValueError(
+            f"Inmediato fuera de rango para {bits} bits: {value}"
+        )
+
+    return value
+
+#transformar el 8(x30) en imm=8 y rs1=30. Esto en lw y lb
+def parse_memory_operand(text: str):
+    text = text.strip()
+
+    if "(" not in text or ")" not in text:
+        raise ValueError(
+            f"Operando de memoria inválido: {text}"
+        )
+
+    left = text.find("(")
+    right = text.find(")")
+
+    if right != len(text) - 1 or right < left:
+        raise ValueError(
+            f"Operando de memoria inválido: {text}"
+        )
+
+    offset_text = text[:left]
+    register_text = text[left + 1:right]
+    #reutilizar las otras funciones
+    imm = parse_immediate(offset_text, 12)
+    rs1 = parse_register(register_text)
+
+    return imm, rs1
+
+#reordenar el inmediato de bew y bne
+def parse_branch_immediate(text: str) -> int:
+    try:
+        value = int(text, 0)
+    except ValueError:
+        raise ValueError(f"Desplazamiento inválido: {text}")
+
+    if value < -4096 or value > 4094:
+        raise ValueError(
+            f"Desplazamiento de branch fuera de rango: {value}"
+        )
+
+    if value % 2 != 0:
+        raise ValueError(
+            "El desplazamiento de un branch debe ser múltiplo de 2"
+        )
+
+    return value
+
+def encode_instruction(instruction: str) -> int:
+    instruction = instruction.strip()
+    parts = instruction.replace(",", " ").split()
+
+    if not parts:
+        raise ValueError("La instrucción está vacía")
+
+    mnemonic = parts[0].lower()
+
+    if mnemonic not in INSTRUCTIONS:
+        raise ValueError(f"Instrucción no soportada: {mnemonic}")
+
+    info = INSTRUCTIONS[mnemonic]
+
+    if info["format"] == "R":
+        if len(parts) != 4:
+            raise ValueError(
+                f"Formato inválido para {mnemonic}. "
+                f"Use: {mnemonic} rd, rs1, rs2"
+            )
+
+        rd = parse_register(parts[1])
+        rs1 = parse_register(parts[2])
+        rs2 = parse_register(parts[3])
+
+        word = (
+            (info["funct7"] << 25)
+            | (rs2 << 20)
+            | (rs1 << 15)
+            | (info["funct3"] << 12)
+            | (rd << 7)
+            | info["opcode"]
+        )
+        return word
+
+    if info["format"] == "I":
+
+        # I aritmético: addi rd, rs1, imm
+        #               andi rd, rs1, imm
+        if mnemonic in ("addi", "andi"):
+
+            if len(parts) != 4:
+                raise ValueError(
+                    f"Formato inválido para {mnemonic}. "
+                    f"Use: {mnemonic} rd, rs1, inmediato"
+                )
+
+            rd = parse_register(parts[1])
+            rs1 = parse_register(parts[2])
+            imm = parse_immediate(parts[3], 12)
+
+        # I de carga: lw rd, imm(rs1)
+        #             lb rd, imm(rs1)
+        elif mnemonic in ("lw", "lb"):
+
+            if len(parts) < 3:
+                raise ValueError(
+                    f"Formato inválido para {mnemonic}. "
+                    f"Use: {mnemonic} rd, desplazamiento(rs1)"
+                )
+
+            rd = parse_register(parts[1])
+
+            memory_operand = "".join(parts[2:])
+
+            imm, rs1 = parse_memory_operand(memory_operand)
+
+        else:
+            raise ValueError(
+                f"Instrucción I no reconocida: {mnemonic}"
+            )
+
+        imm12 = imm & 0xFFF
+
+        word = (
+            (imm12 << 20)
+            | (rs1 << 15)
+            | (info["funct3"] << 12)
+            | (rd << 7)
+            | info["opcode"]
+        )
+
+        return word
+    
+    if info["format"] == "S":
+        if len(parts) < 3:
+            raise ValueError(
+                f"Formato inválido para {mnemonic}. "
+                f"Use: {mnemonic} rs2, desplazamiento(rs1)"
+            )
+
+        # Primer operando: registro cuyo dato se almacena
+        rs2 = parse_register(parts[1])
+
+        # Reconstruir el operando de memoria
+        memory_operand = "".join(parts[2:])
+
+        # Obtener desplazamiento y registro base
+        imm, rs1 = parse_memory_operand(memory_operand)
+
+        # Representación de 12 bits del inmediato
+        imm12 = imm & 0xFFF
+
+        # Separar el inmediato
+        imm_11_5 = (imm12 >> 5) & 0b1111111
+        imm_4_0 = imm12 & 0b11111
+
+        word = (
+            (imm_11_5 << 25)
+            | (rs2 << 20)
+            | (rs1 << 15)
+            | (info["funct3"] << 12)
+            | (imm_4_0 << 7)
+            | info["opcode"]
+        )
+
+        return word
+    
+    if info["format"] == "B":
+        if len(parts) != 4:
+            raise ValueError(
+                f"Formato inválido para {mnemonic}. "
+                f"Use: {mnemonic} rs1, rs2, desplazamiento"
+            )
+
+        rs1 = parse_register(parts[1])
+        rs2 = parse_register(parts[2])
+        imm = parse_branch_immediate(parts[3])
+
+        # Representación del inmediato como 13 bits
+        imm13 = imm & 0x1FFF
+
+        # Extraer las partes que usa el formato B
+        imm_12 = (imm13 >> 12) & 0b1
+        imm_10_5 = (imm13 >> 5) & 0b111111
+        imm_4_1 = (imm13 >> 1) & 0b1111
+        imm_11 = (imm13 >> 11) & 0b1
+
+        word = (
+            (imm_12 << 31)
+            | (imm_10_5 << 25)
+            | (rs2 << 20)
+            | (rs1 << 15)
+            | (info["funct3"] << 12)
+            | (imm_4_1 << 8)
+            | (imm_11 << 7)
+            | info["opcode"]
+        )
+
+        return word   
+
+
+    raise ValueError(f"Formato todavía no implementado: {info['format']}")
+
+
+def explain_instruction(instruction: str, word: int) -> str:
+    # Separar la instrucción para obtener el mnemónico
+    parts = instruction.replace(",", " ").split()
+
+    if not parts:
+        raise ValueError("La instrucción está vacía")
+
+    mnemonic = parts[0].lower()
+
+    if mnemonic not in INSTRUCTIONS:
+        raise ValueError(f"Instrucción no soportada: {mnemonic}")
+
+    info = INSTRUCTIONS[mnemonic]
+
+    # Representación binaria completa de 32 bits
+    binary = f"{word:032b}"
+
+    # ============================================================
+    # FORMATO R
+    # ============================================================
+    if info["format"] == "R":
+        opcode = word & 0b1111111
+        rd = (word >> 7) & 0b11111
+        funct3 = (word >> 12) & 0b111
+        rs1 = (word >> 15) & 0b11111
+        rs2 = (word >> 20) & 0b11111
+        funct7 = (word >> 25) & 0b1111111
+
+        return (
+            f"Formato: R\n"
+            f"Binario: {binary}\n\n"
+
+            f"funct7 [31:25] = {funct7:07b}\n"
+            f"  -> Ayuda a identificar la operación {mnemonic}\n"
+
+            f"rs2    [24:20] = {rs2:05b} (x{rs2})\n"
+            f"  -> x{rs2} es el segundo registro fuente\n"
+
+            f"rs1    [19:15] = {rs1:05b} (x{rs1})\n"
+            f"  -> x{rs1} es el primer registro fuente\n"
+
+            f"funct3 [14:12] = {funct3:03b}\n"
+            f"  -> Ayuda a seleccionar la operación {mnemonic}\n"
+
+            f"rd     [11:7]  = {rd:05b} (x{rd})\n"
+            f"  -> x{rd} recibe el resultado de la operación\n"
+
+            f"opcode [6:0]   = {opcode:07b}\n"
+            f"  -> Identifica la familia de instrucciones registro-registro\n"
+        )
+
+    # ============================================================
+    # FORMATO I
+    # ============================================================
+    if info["format"] == "I":
+        opcode = word & 0b1111111
+        rd = (word >> 7) & 0b11111
+        funct3 = (word >> 12) & 0b111
+        rs1 = (word >> 15) & 0b11111
+        imm12 = (word >> 20) & 0xFFF
+
+        # Convertir el inmediato de 12 bits a valor con signo
+        if imm12 & 0x800:
+            imm = imm12 - 0x1000
+        else:
+            imm = imm12
+
+        # Explicación específica según el tipo de instrucción I
+        if mnemonic in ("lw", "lb"):
+            role_imm = (
+                f"Desplazamiento {imm} que se suma al registro base x{rs1}"
+            )
+            role_rs1 = (
+                f"x{rs1} contiene la dirección base de memoria"
+            )
+            role_rd = (
+                f"x{rd} recibe el dato cargado desde memoria"
+            )
+
+        elif mnemonic in ("addi", "andi"):
+            role_imm = (
+                f"Valor inmediato con signo utilizado por {mnemonic}"
+            )
+            role_rs1 = (
+                f"x{rs1} es el registro fuente"
+            )
+            role_rd = (
+                f"x{rd} recibe el resultado de la operación"
+            )
+
+        else:
+            role_imm = f"Inmediato con valor {imm}"
+            role_rs1 = f"x{rs1} es el registro fuente"
+            role_rd = f"x{rd} es el registro destino"
+
+        return (
+            f"Formato: I\n"
+            f"Binario: {binary}\n\n"
+
+            f"imm    [31:20] = {imm12:012b} ({imm})\n"
+            f"  -> {role_imm}\n"
+
+            f"rs1    [19:15] = {rs1:05b} (x{rs1})\n"
+            f"  -> {role_rs1}\n"
+
+            f"funct3 [14:12] = {funct3:03b}\n"
+            f"  -> Selecciona la operación específica {mnemonic}\n"
+
+            f"rd     [11:7]  = {rd:05b} (x{rd})\n"
+            f"  -> {role_rd}\n"
+
+            f"opcode [6:0]   = {opcode:07b}\n"
+            f"  -> Identifica la familia de la instrucción\n"
+        )
+        
+        
+    # ============================================================
+    # FORMATO S
+    # ============================================================
+    if info["format"] == "S":
+        opcode = word & 0b1111111
+        imm_4_0 = (word >> 7) & 0b11111
+        funct3 = (word >> 12) & 0b111
+        rs1 = (word >> 15) & 0b11111
+        rs2 = (word >> 20) & 0b11111
+        imm_11_5 = (word >> 25) & 0b1111111
+
+        # Reconstruir el inmediato completo de 12 bits
+        imm12 = (imm_11_5 << 5) | imm_4_0
+
+        # Interpretarlo como número con signo
+        if imm12 & 0x800:
+            imm = imm12 - 0x1000
+        else:
+            imm = imm12
+
+        return (
+            f"Formato: S\n"
+            f"Binario: {binary}\n\n"
+
+            f"imm[11:5] [31:25] = {imm_11_5:07b}\n"
+            f"  -> Parte superior del desplazamiento {imm}\n"
+
+            f"rs2       [24:20] = {rs2:05b} (x{rs2})\n"
+            f"  -> x{rs2} contiene el dato que se almacena en memoria\n"
+
+            f"rs1       [19:15] = {rs1:05b} (x{rs1})\n"
+            f"  -> x{rs1} contiene la dirección base de memoria\n"
+
+            f"funct3    [14:12] = {funct3:03b}\n"
+            f"  -> Selecciona la operación específica {mnemonic}\n"
+
+            f"imm[4:0]  [11:7]  = {imm_4_0:05b}\n"
+            f"  -> Parte inferior del desplazamiento {imm}\n"
+
+            f"opcode    [6:0]   = {opcode:07b}\n"
+            f"  -> Identifica la familia de instrucciones de almacenamiento\n\n"
+
+            f"Inmediato reconstruido: {imm12:012b} ({imm})\n"
+            f"Dirección efectiva: x{rs1} + ({imm})\n"
+        )
+        
+    # ============================================================
+    # FORMATO B
+    # ============================================================
+    if info["format"] == "B":
+        opcode = word & 0b1111111
+        imm_11 = (word >> 7) & 0b1
+        imm_4_1 = (word >> 8) & 0b1111
+        funct3 = (word >> 12) & 0b111
+        rs1 = (word >> 15) & 0b11111
+        rs2 = (word >> 20) & 0b11111
+        imm_10_5 = (word >> 25) & 0b111111
+        imm_12 = (word >> 31) & 0b1
+
+        # Reconstruir el inmediato en su orden original
+        imm13 = (
+            (imm_12 << 12)
+            | (imm_11 << 11)
+            | (imm_10_5 << 5)
+            | (imm_4_1 << 1)
+        )
+
+        # Interpretar como número con signo de 13 bits
+        if imm13 & 0x1000:
+            imm = imm13 - 0x2000
+        else:
+            imm = imm13
+
+        if mnemonic == "beq":
+            condition = f"salta si x{rs1} == x{rs2}"
+        else:
+            condition = f"salta si x{rs1} != x{rs2}"
+
+        return (
+            f"Formato: B\n"
+            f"Binario: {binary}\n\n"
+
+            f"imm[12]    [31]    = {imm_12:b}\n"
+            f"  -> Bit de signo del desplazamiento\n"
+
+            f"imm[10:5] [30:25] = {imm_10_5:06b}\n"
+            f"  -> Parte del desplazamiento del salto\n"
+
+            f"rs2       [24:20] = {rs2:05b} (x{rs2})\n"
+            f"  -> Segundo registro utilizado en la comparación\n"
+
+            f"rs1       [19:15] = {rs1:05b} (x{rs1})\n"
+            f"  -> Primer registro utilizado en la comparación\n"
+
+            f"funct3    [14:12] = {funct3:03b}\n"
+            f"  -> Selecciona la operación {mnemonic}\n"
+
+            f"imm[4:1]  [11:8]  = {imm_4_1:04b}\n"
+            f"  -> Parte del desplazamiento del salto\n"
+
+            f"imm[11]   [7]     = {imm_11:b}\n"
+            f"  -> Bit reubicado del desplazamiento\n"
+
+            f"opcode    [6:0]   = {opcode:07b}\n"
+            f"  -> Identifica la familia de saltos condicionales\n\n"
+
+            f"Inmediato reconstruido: {imm13:013b} ({imm})\n"
+            f"Condición: {condition}\n"
+            f"Destino: PC + ({imm}) bytes\n"
+        )
+
+    raise ValueError(
+        f"Formato no implementado en la explicación: {info['format']}"
+    )
+
+
+def main():
+    if len(sys.argv) != 2:
+        print(f'Uso: {sys.argv[0]} "<instruccion>"', file=sys.stderr)
+        print(f'Ejemplo: {sys.argv[0]} "add x5, x6, x7"', file=sys.stderr)
+        sys.exit(2)
+
+    instruction = sys.argv[1]
+    word = encode_instruction(instruction) & 0xFFFFFFFF
+
+    print(explain_instruction(instruction, word))
+
+ 
+    # No modificar el formato de la siguiente línea: la especificación la
+    # requiere, literal, para permitir la validación automática.
+    print(f"HEX: 0x{word:08x}")
+
+
+if __name__ == "__main__":
+    main()

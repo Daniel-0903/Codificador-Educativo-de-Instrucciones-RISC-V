@@ -1,0 +1,193 @@
+============================================================
+ VALIDACION DEL CODIFICADOR RISC-V
+ Nuestro encoder vs GNU RISC-V objdump
+============================================================
+
+[1] add x0, x1, x2
+    Encoder : 0x00208033
+    Objdump : 0x00208033
+    RESULTADO: PASS
+
+[2] add x31, x0, x30
+    Encoder : 0x01e00fb3
+    Objdump : 0x01e00fb3
+    RESULTADO: PASS
+
+[3] add x15, x15, x15
+    Encoder : 0x00f787b3
+    Objdump : 0x00f787b3
+    RESULTADO: PASS
+
+[4] sub x0, x31, x1
+    Encoder : 0x401f8033
+    Objdump : 0x401f8033
+    RESULTADO: PASS
+
+[5] sub x31, x31, x31
+    Encoder : 0x41ff8fb3
+    Objdump : 0x41ff8fb3
+    RESULTADO: PASS
+
+[6] sub x12, x0, x8
+    Encoder : 0x40800633
+    Objdump : 0x40800633
+    RESULTADO: PASS
+
+[7] and x0, x0, x0
+    Encoder : 0x00007033
+    Objdump : 0x00007033
+    RESULTADO: PASS
+
+[8] and x31, x30, x29
+    Encoder : 0x01df7fb3
+    Objdump : 0x01df7fb3
+    RESULTADO: PASS
+
+[9] and x13, x13, x4
+    Encoder : 0x0046f6b3
+    Objdump : 0x0046f6b3
+    RESULTADO: PASS
+
+[10] or x31, x0, x1
+    Encoder : 0x00106fb3
+    Objdump : 0x00106fb3
+    RESULTADO: PASS
+
+[11] or x0, x31, x30
+    Encoder : 0x01efe033
+    Objdump : 0x01efe033
+    RESULTADO: PASS
+
+[12] or x17, x17, x17
+    Encoder : 0x0118e8b3
+    Objdump : 0x0118e8b3
+    RESULTADO: PASS
+
+[13] addi x5, x6, 25
+    Encoder : 0x01930293
+    Objdump : 0x01930293
+    RESULTADO: PASS
+
+[14] addi x10, x1, -25
+    Encoder : 0xfe708513
+    Objdump : 0xfe708513
+    RESULTADO: PASS
+
+[15] addi x31, x0, -2048
+    Encoder : 0x80000f93
+    Objdump : 0x80000f93
+    RESULTADO: PASS
+
+[16] andi x4, x5, 127
+    Encoder : 0x07f2f213
+    Objdump : 0x07f2f213
+    RESULTADO: PASS
+
+[17] andi x20, x7, -1
+    Encoder : 0xfff3fa13
+    Objdump : 0xfff3fa13
+    RESULTADO: PASS
+
+[18] andi x0, x31, 2047
+    Encoder : 0x7ffff013
+    Objdump : 0x7ffff013
+    RESULTADO: PASS
+
+[19] lw x5, 16(x6)
+    Encoder : 0x01032283
+    Objdump : 0x01032283
+    RESULTADO: PASS
+
+[20] lw x10, -32(x8)
+    Encoder : 0xfe042503
+    Objdump : 0xfe042503
+    RESULTADO: PASS
+
+[21] lw x31, -2048(x0)
+    Encoder : 0x80002f83
+    Objdump : 0x80002f83
+    RESULTADO: PASS
+
+[22] lb x3, 31(x4)
+    Encoder : 0x01f20183
+    Objdump : 0x01f20183
+    RESULTADO: PASS
+
+[23] lb x8, -17(x20)
+    Encoder : 0xfefa0403
+    Objdump : 0xfefa0403
+    RESULTADO: PASS
+
+[24] lb x0, 2047(x31)
+    Encoder : 0x7fff8003
+    Objdump : 0x7fff8003
+    RESULTADO: PASS
+
+[25] sw x5, 20(x6)
+    Encoder : 0x00532a23
+    Objdump : 0x00532a23
+    RESULTADO: PASS
+
+[26] sw x10, -36(x8)
+    Encoder : 0xfca42e23
+    Objdump : 0xfca42e23
+    RESULTADO: PASS
+
+[27] sw x31, -2048(x0)
+    Encoder : 0x81f02023
+    Objdump : 0x81f02023
+    RESULTADO: PASS
+
+[28] sb x3, 15(x4)
+    Encoder : 0x003207a3
+    Objdump : 0x003207a3
+    RESULTADO: PASS
+
+[29] sb x8, -19(x20)
+    Encoder : 0xfe8a06a3
+    Objdump : 0xfe8a06a3
+    RESULTADO: PASS
+
+[30] sb x0, 2047(x31)
+    Encoder : 0x7e0f8fa3
+    Objdump : 0x7e0f8fa3
+    RESULTADO: PASS
+
+[31] beq x1, x2, 8
+    Encoder : 0x00208463
+    Objdump : 0x00208463
+    RESULTADO: PASS
+
+[32] beq x31, x0, -4096
+    Encoder : 0x800f8063
+    Objdump : 0x800f8063
+    RESULTADO: PASS
+
+[33] beq x0, x0, 0
+    Encoder : 0x00000063
+    Objdump : 0x00000063
+    RESULTADO: PASS
+
+[34] bne x5, x6, -8
+    Encoder : 0xfe629ce3
+    Objdump : 0xfe629ce3
+    RESULTADO: PASS
+
+[35] bne x0, x31, 4094
+    Encoder : 0x7ff01fe3
+    Objdump : 0x7ff01fe3
+    RESULTADO: PASS
+
+[36] bne x31, x31, 0
+    Encoder : 0x01ff9063
+    Objdump : 0x01ff9063
+    RESULTADO: PASS
+
+============================================================
+ RESUMEN
+============================================================
+Total      : 36
+Correctos  : 36
+Incorrectos: 0
+
+VALIDACION EXITOSA: 36/36 casos coinciden.
